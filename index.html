@@ -86,30 +86,29 @@
     <div class="group">
       <h3>Colour by</h3>
       <div class="seg" id="colorby">
-        <button data-k="category" class="on">Category</button>
+        <button data-k="stack" class="on">Stack</button>
+        <button data-k="category">Category</button>
         <button data-k="org">Org</button>
-        <button data-k="stack">Stack</button>
+        <button data-k="status">Health</button>
       </div>
-    </div>
-    <div class="group">
-      <h3>Links shown</h3>
-      <label class="chk"><input type="checkbox" id="rel-IN_CATEGORY" checked><span class="lbl">Category</span></label>
-      <label class="chk"><input type="checkbox" id="rel-IN_ORG"><span class="lbl">Org</span></label>
-      <label class="chk"><input type="checkbox" id="rel-USES_STACK"><span class="lbl">Stack</span></label>
-      <label class="chk"><input type="checkbox" id="rel-VARIANT_OF" checked><span class="lbl">Variant / duplicate</span></label>
     </div>
     <div class="group">
       <h3>Layout</h3>
       <select id="layout">
-        <option value="cose">Force-directed (organic)</option>
-        <option value="concentric">Concentric (by type)</option>
-        <option value="breadthfirst">Hierarchy</option>
-        <option value="grid">Grid</option>
+        <option value="map">Grouped map (by category)</option>
+        <option value="cose">Network (force-directed)</option>
       </select>
       <div class="btnrow">
         <button id="fit">Fit</button>
         <button id="reset">Reset</button>
       </div>
+    </div>
+    <div class="group">
+      <h3>Overlay links</h3>
+      <label class="chk"><input type="checkbox" id="rel-VARIANT_OF" checked><span class="lbl">Variant / duplicate</span></label>
+      <label class="chk"><input type="checkbox" id="rel-IN_ORG"><span class="lbl">Org (network only)</span></label>
+      <label class="chk"><input type="checkbox" id="rel-USES_STACK"><span class="lbl">Stack (network only)</span></label>
+      <input type="hidden" id="rel-IN_CATEGORY">
     </div>
     <div class="group">
       <h3>View &amp; health</h3>
@@ -132,7 +131,7 @@
   <div id="cy"></div>
 
   <aside class="right">
-    <div id="details"><div class="ph">Click any node to inspect.<br/>Big dots = repos, ringed dots = hubs (org / category / stack).</div></div>
+    <div id="details"><div class="ph">Click any repo or category box to inspect.<br/>Repos are grouped into category boxes; the ring colour shows git health.</div></div>
   </aside>
 </div>
 
@@ -159,12 +158,15 @@
   // private-org colour key is injected from data (keeps confidential names out of this file)
   if (window.ESTATE && window.ESTATE.meta && window.ESTATE.meta.org_colors)
     Object.assign(ORG_COLORS, window.ESTATE.meta.org_colors);
+  const STATUS_COLORS={diverged:"#f0883e",dirty:"#f85149",unpushed:"#e3b341",
+    stale:"#6e7681",clean:"#3fb950","no-git":"#30363d"};
   const fallback = ["#58a6ff","#3fb950","#f0883e","#bc8cff","#ff7b72","#39c5cf","#e3b341","#d2a8ff","#7ee787","#ff9bce","#a5d6ff","#79c0ff"];
   const stackColor = {};
   let fi=0;
   function colorFor(kind,val){
     if(kind==="category") return CAT_COLORS[val]||"#8b949e";
     if(kind==="org") return ORG_COLORS[val]||"#8b949e";
+    if(kind==="status") return STATUS_COLORS[val]||"#8b949e";
     if(!stackColor[val]) stackColor[val]=fallback[fi++%fallback.length];
     return stackColor[val];
   }
@@ -180,7 +182,17 @@
 
   // ---- build elements -----------------------------------------------------
   const elements = E.nodes.concat(E.edges).map(x=>({data:Object.assign({},x.data)}));
-  let colorBy="category";
+  // Readable grouping: every repo becomes a child of its category "box" (compound
+  // parent). Category hubs render as labelled translucent containers.
+  elements.forEach(el=>{
+    const d=el.data;
+    if(d.kind==="project") d.parent="category:"+d.category;
+    if(d.kind==="category"){
+      d.boxbg=CAT_COLORS[d.label]||"#8b949e";
+      d.boxlabel=(d.label||"")+"   ·   "+(d.count||0);
+    }
+  });
+  let colorBy="stack";
   function applyColors(){
     elements.forEach(el=>{
       const d=el.data;
@@ -195,10 +207,11 @@
     minZoom:.15,maxZoom:3,
     style:[
       {selector:"node[kind='project']",style:{
-        "background-color":"data(bg)","label":"data(label)","color":"#c9d1d9",
-        "font-size":7,"text-valign":"bottom","text-margin-y":3,
-        "width":"mapData(recency,0.15,1,14,42)","height":"mapData(recency,0.15,1,14,42)",
-        "border-width":1,"border-color":"#0d1117","text-opacity":0}},
+        "background-color":"data(bg)","label":"data(label)","color":"#adbac7",
+        "font-size":7.5,"text-valign":"bottom","text-margin-y":2,
+        "text-wrap":"ellipsis","text-max-width":80,
+        "width":"mapData(recency,0.15,1,12,22)","height":"mapData(recency,0.15,1,12,22)",
+        "border-width":1,"border-color":"#0d1117","text-opacity":0,"z-index":10}},
       {selector:"node[kind='project'][status='stale']",style:{"border-width":2,"border-color":"#6e7681"}},
       {selector:"node[kind='project'][status='unpushed']",style:{"border-width":2.5,"border-color":"#e3b341"}},
       {selector:"node[kind='project'][status='dirty']",style:{"border-width":2.5,"border-color":"#f85149"}},
@@ -210,6 +223,14 @@
         "text-valign":"center","text-halign":"center","text-wrap":"wrap","text-max-width":120,
         "padding":"8px","width":"label","height":"label",
         "border-width":2,"border-color":"#3fb950"}},
+      {selector:"node[kind='category']",style:{
+        "background-color":"data(boxbg)","background-opacity":0.06,
+        "border-width":1.5,"border-color":"data(boxbg)","border-opacity":0.55,
+        "shape":"round-rectangle","label":"data(boxlabel)",
+        "text-valign":"top","text-halign":"center","text-margin-y":-4,
+        "font-size":13,"font-weight":"bold","color":"data(boxbg)",
+        "text-wrap":"none","padding":"16px","text-opacity":1,"z-index":1,
+        "min-width":60}},
       {selector:"node[kind='org']",style:{"border-color":"#58a6ff"}},
       {selector:"node[kind='stack']",style:{"border-color":"#bc8cff","shape":"diamond","height":34,"width":34,"text-valign":"bottom","text-margin-y":2}},
       {selector:"edge",style:{"width":.7,"line-color":"#2d3440","curve-style":"haystack","opacity":.55}},
@@ -220,19 +241,48 @@
       {selector:".hidden",style:{"display":"none"}},
       {selector:"node:selected",style:{"border-width":3,"border-color":"#fff","text-opacity":1}}
     ],
-    layout:{name:"cose"}
+    layout:{name:"preset"}
   });
 
   // ---- layouts ------------------------------------------------------------
+  // Deterministic "map": pack category boxes onto shelves; tile each box's repos
+  // in a grid. Category (parent) nodes auto-fit around their children.
+  function computeMap(){
+    const SPX=88, SPY=46, PAD=20, TITLE=30, GAPX=46, GAPY=60, MAXW=2050;
+    const groups={};
+    cy.nodes("[kind='project']:visible").forEach(n=>{
+      (groups[n.data("category")]=groups[n.data("category")]||[]).push(n);
+    });
+    const order=Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length);
+    let x=0,y=0,shelfH=0;
+    order.forEach(cat=>{
+      const ns=groups[cat].sort((a,b)=>a.data("label")<b.data("label")?-1:1);
+      const cols=Math.max(1,Math.round(Math.sqrt(ns.length*1.1)));
+      const rows=Math.ceil(ns.length/cols);
+      const boxW=cols*SPX+PAD*2, boxH=rows*SPY+TITLE+PAD;
+      if(x>0 && x+boxW>MAXW){ x=0; y+=shelfH+GAPY; shelfH=0; }
+      ns.forEach((node,i)=>{
+        const c=i%cols, r=Math.floor(i/cols);
+        node.position({x:x+PAD+SPX/2+c*SPX, y:y+TITLE+SPY/2+r*SPY});
+      });
+      shelfH=Math.max(shelfH,boxH);
+      x+=boxW+GAPX;
+    });
+  }
   const LAYOUTS={
-    cose:{name:"cose",animate:false,nodeRepulsion:9000,idealEdgeLength:55,gravity:.6,
-          numIter:1200,coolingFactor:.95,nodeOverlap:14,componentSpacing:90},
-    concentric:{name:"concentric",concentric:n=>n.data("kind")==="project"?1:10,
-          levelWidth:()=>1,minNodeSpacing:14,animate:false},
-    breadthfirst:{name:"breadthfirst",directed:true,spacingFactor:.9,animate:false},
-    grid:{name:"grid",animate:false}
+    cose:{name:"cose",animate:false,nodeRepulsion:9000,idealEdgeLength:60,gravity:.7,
+          numIter:1000,coolingFactor:.95,nodeOverlap:18,componentSpacing:110,
+          nestingFactor:1.2,padding:26}
   };
-  function runLayout(name){cy.layout(LAYOUTS[name]||LAYOUTS.cose).run();}
+  function runLayout(name){
+    if(name==="map"){
+      computeMap();
+      cy.layout({name:"preset",fit:false,animate:false}).run();
+      cy.fit(cy.nodes(":visible"),30);
+    }else{
+      cy.layout(LAYOUTS[name]||LAYOUTS.cose).run();
+    }
+  }
 
   // ---- relation visibility ------------------------------------------------
   function updateRelations(){
@@ -240,8 +290,8 @@
       const on=document.getElementById("rel-"+rel).checked;
       cy.edges(`[rel='${rel}']`).toggleClass("hidden",!on);
     });
-    // hide hub nodes with no visible incident edge
-    cy.nodes("[kind!='project']").forEach(h=>{
+    // hide org/stack hubs with no visible incident edge (category boxes are kept)
+    cy.nodes("[kind='org'], [kind='stack']").forEach(h=>{
       const vis=h.connectedEdges().filter(e=>!e.hasClass("hidden")).length>0;
       h.toggleClass("hidden",!vis);
     });
@@ -258,7 +308,9 @@
   function updateCatFilter(){
     const on=new Set([...document.querySelectorAll(".catbox:checked")].map(b=>b.value));
     cy.nodes("[kind='project']").forEach(n=>n.toggleClass("hidden",!on.has(n.data("category"))));
+    cy.nodes("[kind='category']").forEach(p=>p.toggleClass("hidden",p.children(":visible").length===0));
     updateRelations();
+    if(document.getElementById("layout").value==="map") runLayout("map");
   }
   document.getElementById("catfilter").addEventListener("change",updateCatFilter);
 
@@ -363,24 +415,40 @@
 
   document.getElementById("reset").addEventListener("click",()=>{
     document.querySelectorAll(".catbox").forEach(b=>b.checked=true);
-    document.getElementById("rel-IN_CATEGORY").checked=true;
+    document.getElementById("rel-IN_CATEGORY").checked=false;
     document.getElementById("rel-VARIANT_OF").checked=true;
     document.getElementById("rel-IN_ORG").checked=false;
     document.getElementById("rel-USES_STACK").checked=false;
     document.getElementById("search").value="";
-    labelsOn=false; document.getElementById("labels").checked=false;
+    labelsOn=true; document.getElementById("labels").checked=true;
     attnOn=false; document.getElementById("attn").classList.remove("on");
-    cy.elements().removeClass("dim hot lbl-on");
-    updateCatFilter(); runLayout("cose"); setTimeout(()=>cy.fit(cy.nodes(":visible"),40),50);
+    cy.elements().removeClass("dim hot");
+    cy.nodes("[kind='project']").addClass("lbl-on");
+    document.getElementById("layout").value="map";
+    updateCatFilter(); runLayout("map"); setTimeout(()=>cy.fit(cy.nodes(":visible"),30),50);
   });
-  ["IN_CATEGORY","IN_ORG","USES_STACK","VARIANT_OF"].forEach(rel=>
-    document.getElementById("rel-"+rel).addEventListener("change",updateRelations));
+  ["IN_CATEGORY","IN_ORG","USES_STACK","VARIANT_OF"].forEach(rel=>{
+    const el=document.getElementById("rel-"+rel);
+    if(!el) return;
+    el.addEventListener("change",()=>{
+      updateRelations();
+      // org/stack hubs are only positioned by the force layout — switch into it
+      if((rel==="IN_ORG"||rel==="USES_STACK") && el.checked){
+        document.getElementById("layout").value="cose";
+        runLayout("cose");
+      }
+    });
+  });
 
   // ---- init ---------------------------------------------------------------
   window.cy = cy;  // ponytail: handy in browser console + lets a smoke test read state
+  // Start readable: grouped map, repo labels on.
+  labelsOn=true;
+  cy.nodes("[kind='project']").addClass("lbl-on");
+  document.getElementById("labels").checked=true;
   updateRelations();
-  runLayout("cose");
-  setTimeout(()=>cy.fit(cy.nodes(":visible"),40),60);
+  runLayout("map");
+  setTimeout(()=>cy.fit(cy.nodes(":visible"),30),60);
 })();
 </script>
 </body>
