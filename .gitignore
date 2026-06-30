@@ -1,0 +1,19 @@
+# --- Never commit: real scan outputs (confidential repo names, remotes, local paths)
+/estate.json
+/estate-data.js
+/estate.cypher
+/preview.png
+
+# --- Never commit: confidential identifier patterns
+/estate.config.json
+
+# --- Tracked & published: source + sanitized site live in git
+#   generate.py, index.html, vendor/, README.md, docs/  (do NOT ignore)
+
+# --- Legacy separate publish repo (superseded by /docs)
+/public/
+
+# --- Python / macOS
+__pycache__/
+*.pyc
+.DS_Store

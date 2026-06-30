@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Estate Graph</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2d3440;
+    --txt:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --accent2:#3fb950;
+    --warn:#f0883e; --danger:#f85149; --chip:#21262d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  #app{display:grid;grid-template-columns:300px 1fr 320px;grid-template-rows:auto 1fr;height:100vh}
+  header{grid-column:1/4;display:flex;align-items:center;gap:18px;padding:10px 18px;
+    background:linear-gradient(90deg,#0d1117,#161b22);border-bottom:1px solid var(--line)}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+  header h1 span{color:var(--accent)}
+  .stat{display:flex;flex-direction:column;line-height:1.1}
+  .stat b{font-size:16px;font-weight:700}
+  .stat small{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+  .stats{display:flex;gap:16px;margin-left:auto}
+  aside{background:var(--panel);overflow-y:auto;padding:14px;border-right:1px solid var(--line)}
+  aside.right{border-right:none;border-left:1px solid var(--line)}
+  #cy{width:100%;height:100%;background:
+     radial-gradient(circle at 30% 20%,#11161f,#0d1117 70%)}
+  .group{margin-bottom:18px}
+  .group h3{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    margin:0 0 8px;font-weight:600}
+  input[type=search],select{width:100%;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:12px}
+  input[type=search]:focus,select:focus{outline:none;border-color:var(--accent)}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{flex:1;background:none;border:none;color:var(--muted);padding:6px 4px;cursor:pointer;font-size:11px}
+  .seg button.on{background:var(--accent);color:#0d1117;font-weight:600}
+  .chk{display:flex;align-items:center;gap:8px;padding:3px 4px;border-radius:5px;cursor:pointer}
+  .chk:hover{background:var(--panel2)}
+  .chk input{accent-color:var(--accent)}
+  .dot{width:11px;height:11px;border-radius:3px;flex:none}
+  .chk span.lbl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chk small{color:var(--muted)}
+  .btnrow{display:flex;gap:8px;margin-top:8px}
+  .btnrow button{flex:1;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:7px;cursor:pointer;font-size:12px}
+  .btnrow button:hover{border-color:var(--accent)}
+  .btnrow button.on{background:var(--warn);color:#0d1117;border-color:var(--warn);font-weight:600}
+  #details{font-size:12px}
+  #details .ph{color:var(--muted);text-align:center;margin-top:40px}
+  #details h2{font-size:15px;margin:0 0 2px;word-break:break-word}
+  #details .sub{color:var(--muted);margin-bottom:12px}
+  .kv{display:grid;grid-template-columns:84px 1fr;gap:4px 10px;margin:10px 0}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0;word-break:break-word}
+  .tag{display:inline-block;padding:2px 8px;border-radius:20px;background:var(--chip);font-size:11px}
+  .tag.git{background:#12331f;color:var(--accent2)}
+  .tag.dirty{background:#3d1d12;color:var(--warn)}
+  .tag.nogit{background:#30262e;color:var(--muted)}
+  .tag.st-diverged{background:#3d2a12;color:#f0883e}
+  .tag.st-dirty{background:#3d1d12;color:#f85149}
+  .tag.st-unpushed{background:#3a3411;color:#e3b341}
+  .tag.st-stale{background:#262b30;color:#8b949e}
+  .tag.st-clean{background:#12331f;color:#3fb950}
+  .tag.st-no-git{background:#30262e;color:#8b949e}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .legend small{display:block;color:var(--muted);margin-top:6px;font-size:10px}
+  .muted{color:var(--muted)}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Estate&nbsp;<span>Graph</span></h1>
+    <span class="muted" id="meta-root"></span>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <aside class="left">
+    <div class="group">
+      <h3>Search</h3>
+      <input type="search" id="search" placeholder="filter repos by name…" autocomplete="off"/>
+    </div>
+    <div class="group">
+      <h3>Colour by</h3>
+      <div class="seg" id="colorby">
+        <button data-k="category" class="on">Category</button>
+        <button data-k="org">Org</button>
+        <button data-k="stack">Stack</button>
+      </div>
+    </div>
+    <div class="group">
+      <h3>Links shown</h3>
+      <label class="chk"><input type="checkbox" id="rel-IN_CATEGORY" checked><span class="lbl">Category</span></label>
+      <label class="chk"><input type="checkbox" id="rel-IN_ORG"><span class="lbl">Org</span></label>
+      <label class="chk"><input type="checkbox" id="rel-USES_STACK"><span class="lbl">Stack</span></label>
+      <label class="chk"><input type="checkbox" id="rel-VARIANT_OF" checked><span class="lbl">Variant / duplicate</span></label>
+    </div>
+    <div class="group">
+      <h3>Layout</h3>
+      <select id="layout">
+        <option value="cose">Force-directed (organic)</option>
+        <option value="concentric">Concentric (by type)</option>
+        <option value="breadthfirst">Hierarchy</option>
+        <option value="grid">Grid</option>
+      </select>
+      <div class="btnrow">
+        <button id="fit">Fit</button>
+        <button id="reset">Reset</button>
+      </div>
+    </div>
+    <div class="group">
+      <h3>View &amp; health</h3>
+      <label class="chk"><input type="checkbox" id="labels"><span class="lbl">Show all labels</span></label>
+      <div class="btnrow"><button id="attn">⚠ Needs attention</button></div>
+      <div class="btnrow"><button id="png">⬇ Export PNG</button></div>
+      <small class="muted" style="display:block;margin-top:6px;line-height:1.5">
+        Repo ring: <span style="color:#f0883e">diverged</span> ·
+        <span style="color:#f85149">uncommitted</span> ·
+        <span style="color:#e3b341">unpushed</span> ·
+        <span style="color:#6e7681">stale</span>
+      </small>
+    </div>
+    <div class="group legend">
+      <h3>Filter categories</h3>
+      <div id="catfilter"></div>
+    </div>
+  </aside>
+
+  <div id="cy"></div>
+
+  <aside class="right">
+    <div id="details"><div class="ph">Click any node to inspect.<br/>Big dots = repos, ringed dots = hubs (org / category / stack).</div></div>
+  </aside>
+</div>
+
+<script src="vendor/cytoscape.min.js"></script>
+<script src="estate-data.js"></script>
+<script>
+(function(){
+  const E = window.ESTATE;
+  if(!E){document.body.innerHTML="<p style='padding:40px'>estate-data.js missing — run <code>python3 generate.py</code></p>";return;}
+
+  // ---- palettes -----------------------------------------------------------
+  const CAT_COLORS = {
+    "AI / ML / Agents":"#bc8cff","Mule / ESB":"#3fb950","Apigee / API Mgmt":"#58a6ff",
+    "IIB / ACE / Transform":"#f0883e","MQ / Messaging / Eventing":"#e3b341",
+    "Integration Infra":"#39c5cf","Microservices":"#ff7b72","DataStage / Data":"#d2a8ff",
+    "Cloud / Azure / Observability":"#79c0ff","Automation / CICD / Quality":"#7ee787",
+    "Platform / Control Plane":"#ffa657","Language / Framework Sandbox":"#a5d6ff",
+    "Personal":"#ff9bce","Other":"#8b949e"
+  };
+  const ORG_COLORS = {
+    "enterprise":"#58a6ff","ssmule":"#3fb950","external":"#f0883e",
+    "local-only":"#e3b341","not-git":"#6e7681"
+  };
+  // private-org colour key is injected from data (keeps confidential names out of this file)
+  if (window.ESTATE && window.ESTATE.meta && window.ESTATE.meta.org_colors)
+    Object.assign(ORG_COLORS, window.ESTATE.meta.org_colors);
+  const fallback = ["#58a6ff","#3fb950","#f0883e","#bc8cff","#ff7b72","#39c5cf","#e3b341","#d2a8ff","#7ee787","#ff9bce","#a5d6ff","#79c0ff"];
+  const stackColor = {};
+  let fi=0;
+  function colorFor(kind,val){
+    if(kind==="category") return CAT_COLORS[val]||"#8b949e";
+    if(kind==="org") return ORG_COLORS[val]||"#8b949e";
+    if(!stackColor[val]) stackColor[val]=fallback[fi++%fallback.length];
+    return stackColor[val];
+  }
+
+  // ---- header stats -------------------------------------------------------
+  const m=E.meta;
+  document.getElementById("meta-root").textContent = m.root+"  ·  generated "+m.generated_at;
+  const S=[["Repos",m.total_projects,0],["Git",m.git_repos,0],["Uncommitted",m.dirty,1],
+           ["Unpushed",m.unpushed||0,1],["Diverged",m.diverged||0,1],["Stale >90d",m.stale_90d,1],
+           ["Attention",m.attention||0,1],["Stacks",m.stacks.length,0]];
+  document.getElementById("stats").innerHTML =
+    S.map(([k,v,w])=>`<div class="stat"><b${w&&v>0?' style="color:var(--warn)"':''}>${v}</b><small>${k}</small></div>`).join("");
+
+  // ---- build elements -----------------------------------------------------
+  const elements = E.nodes.concat(E.edges).map(x=>({data:Object.assign({},x.data)}));
+  let colorBy="category";
+  function applyColors(){
+    elements.forEach(el=>{
+      const d=el.data;
+      if(d.kind==="project") d.bg=colorFor(colorBy,d[colorBy]);
+    });
+  }
+  applyColors();
+
+  const cy = cytoscape({
+    container:document.getElementById("cy"),
+    elements,
+    minZoom:.15,maxZoom:3,
+    style:[
+      {selector:"node[kind='project']",style:{
+        "background-color":"data(bg)","label":"data(label)","color":"#c9d1d9",
+        "font-size":7,"text-valign":"bottom","text-margin-y":3,
+        "width":"mapData(recency,0.15,1,14,42)","height":"mapData(recency,0.15,1,14,42)",
+        "border-width":1,"border-color":"#0d1117","text-opacity":0}},
+      {selector:"node[kind='project'][status='stale']",style:{"border-width":2,"border-color":"#6e7681"}},
+      {selector:"node[kind='project'][status='unpushed']",style:{"border-width":2.5,"border-color":"#e3b341"}},
+      {selector:"node[kind='project'][status='dirty']",style:{"border-width":2.5,"border-color":"#f85149"}},
+      {selector:"node[kind='project'][?dirty]",style:{"border-width":2.5,"border-color":"#f85149"}},
+      {selector:"node[kind='project'][status='diverged']",style:{"border-width":3,"border-color":"#f0883e"}},
+      {selector:"node[kind!='project']",style:{
+        "background-color":"#1c2230","label":"data(label)","color":"#e6edf3",
+        "shape":"round-rectangle","font-size":10,"font-weight":"bold",
+        "text-valign":"center","text-halign":"center","text-wrap":"wrap","text-max-width":120,
+        "padding":"8px","width":"label","height":"label",
+        "border-width":2,"border-color":"#3fb950"}},
+      {selector:"node[kind='org']",style:{"border-color":"#58a6ff"}},
+      {selector:"node[kind='stack']",style:{"border-color":"#bc8cff","shape":"diamond","height":34,"width":34,"text-valign":"bottom","text-margin-y":2}},
+      {selector:"edge",style:{"width":.7,"line-color":"#2d3440","curve-style":"haystack","opacity":.55}},
+      {selector:"edge[rel='VARIANT_OF']",style:{"width":2,"line-color":"#f0883e","line-style":"dashed","curve-style":"bezier","opacity":.9,"target-arrow-shape":"triangle","target-arrow-color":"#f0883e"}},
+      {selector:".dim",style:{"opacity":.07,"text-opacity":0}},
+      {selector:"node[kind='project'].lbl-on",style:{"text-opacity":1}},
+      {selector:".hot",style:{"text-opacity":1,"border-width":3,"border-color":"#fff","z-index":99}},
+      {selector:".hidden",style:{"display":"none"}},
+      {selector:"node:selected",style:{"border-width":3,"border-color":"#fff","text-opacity":1}}
+    ],
+    layout:{name:"cose"}
+  });
+
+  // ---- layouts ------------------------------------------------------------
+  const LAYOUTS={
+    cose:{name:"cose",animate:false,nodeRepulsion:9000,idealEdgeLength:55,gravity:.6,
+          numIter:1200,coolingFactor:.95,nodeOverlap:14,componentSpacing:90},
+    concentric:{name:"concentric",concentric:n=>n.data("kind")==="project"?1:10,
+          levelWidth:()=>1,minNodeSpacing:14,animate:false},
+    breadthfirst:{name:"breadthfirst",directed:true,spacingFactor:.9,animate:false},
+    grid:{name:"grid",animate:false}
+  };
+  function runLayout(name){cy.layout(LAYOUTS[name]||LAYOUTS.cose).run();}
+
+  // ---- relation visibility ------------------------------------------------
+  function updateRelations(){
+    ["IN_CATEGORY","IN_ORG","USES_STACK","VARIANT_OF"].forEach(rel=>{
+      const on=document.getElementById("rel-"+rel).checked;
+      cy.edges(`[rel='${rel}']`).toggleClass("hidden",!on);
+    });
+    // hide hub nodes with no visible incident edge
+    cy.nodes("[kind!='project']").forEach(h=>{
+      const vis=h.connectedEdges().filter(e=>!e.hasClass("hidden")).length>0;
+      h.toggleClass("hidden",!vis);
+    });
+  }
+
+  // ---- category filter ----------------------------------------------------
+  const cats=m.categories.slice().sort();
+  const counts={};
+  cy.nodes("[kind='project']").forEach(n=>{counts[n.data("category")]=(counts[n.data("category")]||0)+1;});
+  document.getElementById("catfilter").innerHTML = cats.map(c=>
+    `<label class="chk"><input type="checkbox" class="catbox" value="${c}" checked>
+     <span class="dot" style="background:${CAT_COLORS[c]||'#8b949e'}"></span>
+     <span class="lbl">${c}</span><small>${counts[c]||0}</small></label>`).join("");
+  function updateCatFilter(){
+    const on=new Set([...document.querySelectorAll(".catbox:checked")].map(b=>b.value));
+    cy.nodes("[kind='project']").forEach(n=>n.toggleClass("hidden",!on.has(n.data("category"))));
+    updateRelations();
+  }
+  document.getElementById("catfilter").addEventListener("change",updateCatFilter);
+
+  // ---- colour-by ----------------------------------------------------------
+  document.getElementById("colorby").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b)return;
+    [...e.currentTarget.children].forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); colorBy=b.dataset.k;
+    cy.nodes("[kind='project']").forEach(n=>n.data("bg",colorFor(colorBy,n.data(colorBy))));
+  });
+
+  // ---- search -------------------------------------------------------------
+  document.getElementById("search").addEventListener("input",e=>{
+    const q=e.target.value.trim().toLowerCase();
+    if(attnOn){attnOn=false;document.getElementById("attn").classList.remove("on");}
+    cy.elements().removeClass("dim hot");
+    if(!q)return;
+    const hit=cy.nodes("[kind='project']").filter(n=>n.data("label").toLowerCase().includes(q));
+    if(hit.length===0)return;
+    cy.elements().addClass("dim");
+    hit.removeClass("dim").addClass("hot");
+    hit.neighborhood().removeClass("dim");
+  });
+
+  // ---- details panel ------------------------------------------------------
+  function esc(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+  function webUrl(r){if(!r)return"";let u=r.replace(/^git@([^:]+):/,"https://$1/").replace(/\.git$/,"");return u.startsWith("http")?u:"";}
+  function showProject(d){
+    const url=webUrl(d.remote);
+    const statusTag=!d.is_git?`<span class="tag nogit">not git</span>`:
+      `<span class="tag st-${esc(d.status)}">${esc(d.status||"clean")}</span>`;
+    const age=d.age_days>=0?`${d.age_days} days ago`:"—";
+    const sync=!d.is_git?"—":
+      ((d.ahead||d.behind)
+        ? `<span style="color:${d.ahead?'var(--warn)':'inherit'}">↑${d.ahead||0} ahead</span> · ↓${d.behind||0} behind`
+        : `<span class="muted">up to date</span>`);
+    document.getElementById("details").innerHTML=`
+      <h2>${esc(d.label)}</h2>
+      <div class="sub">${esc(d.category)}</div>
+      <div>${statusTag} <span class="tag" style="background:${colorFor('stack',d.stack)};color:#0d1117">${esc(d.stack)}</span></div>
+      <dl class="kv">
+        <dt>Org</dt><dd>${esc(d.org)}</dd>
+        <dt>Stack</dt><dd>${esc(d.stack)}</dd>
+        <dt>Branch</dt><dd>${d.branch?esc(d.branch):"—"}</dd>
+        <dt>Sync</dt><dd>${sync}</dd>
+        <dt>Last commit</dt><dd>${d.last_commit?esc(d.last_commit)+` <span class="muted">(${age})</span>`:"—"}</dd>
+        <dt>Remote</dt><dd>${url?`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace('https://',''))}</a>`:'<span class="muted">local only</span>'}</dd>
+        <dt>Path</dt><dd><code>${esc(d.path)||'<span class="muted">—</span>'}</code></dd>
+      </dl>`;
+  }
+  function showHub(d){
+    const kind=d.kind;
+    // members resolved via the hub's incident edges (org hub label != project's org value)
+    const conn=cy.getElementById(d.id).connectedEdges().connectedNodes("[kind='project']");
+    const list=conn.map(n=>`<span class="tag" style="margin:2px">${esc(n.data("label"))}</span>`).join(" ");
+    document.getElementById("details").innerHTML=`
+      <h2>${esc(d.label)}</h2>
+      <div class="sub">${kind.toUpperCase()} hub · ${conn.length} repos</div>
+      <div style="margin-top:10px;line-height:2">${list}</div>`;
+  }
+  cy.on("tap","node",e=>{
+    const d=e.target.data();
+    if(d.kind==="project") showProject(d); else showHub(d);
+  });
+  cy.on("tap",e=>{if(e.target===cy){cy.elements().removeClass("dim hot");cy.$(":selected").unselect();}});
+
+  // ---- controls -----------------------------------------------------------
+  document.getElementById("layout").addEventListener("change",e=>runLayout(e.target.value));
+  document.getElementById("fit").addEventListener("click",()=>cy.fit(cy.nodes(":visible"),40));
+
+  // show-all-labels toggle
+  let labelsOn=false;
+  document.getElementById("labels").addEventListener("change",e=>{
+    labelsOn=e.target.checked;
+    cy.nodes("[kind='project']").toggleClass("lbl-on",labelsOn);
+  });
+
+  // "needs attention" — dim everything except repos with a risk status
+  let attnOn=false;
+  const ATTN=new Set(["diverged","dirty","unpushed","stale"]);
+  function applyAttention(){
+    cy.elements().removeClass("dim hot");
+    if(!attnOn)return;
+    const hit=cy.nodes("[kind='project']").filter(n=>ATTN.has(n.data("status")));
+    cy.elements().addClass("dim");
+    hit.removeClass("dim").addClass("hot");
+    hit.neighborhood().removeClass("dim");
+  }
+  document.getElementById("attn").addEventListener("click",e=>{
+    attnOn=!attnOn;
+    e.target.classList.toggle("on",attnOn);
+    document.getElementById("search").value="";
+    applyAttention();
+  });
+
+  // export current canvas as a high-res PNG (portfolio-friendly)
+  document.getElementById("png").addEventListener("click",()=>{
+    const png=cy.png({full:true,scale:2,bg:"#0d1117"});
+    const a=document.createElement("a");
+    a.href=png; a.download="estate-graph.png"; a.click();
+  });
+
+  document.getElementById("reset").addEventListener("click",()=>{
+    document.querySelectorAll(".catbox").forEach(b=>b.checked=true);
+    document.getElementById("rel-IN_CATEGORY").checked=true;
+    document.getElementById("rel-VARIANT_OF").checked=true;
+    document.getElementById("rel-IN_ORG").checked=false;
+    document.getElementById("rel-USES_STACK").checked=false;
+    document.getElementById("search").value="";
+    labelsOn=false; document.getElementById("labels").checked=false;
+    attnOn=false; document.getElementById("attn").classList.remove("on");
+    cy.elements().removeClass("dim hot lbl-on");
+    updateCatFilter(); runLayout("cose"); setTimeout(()=>cy.fit(cy.nodes(":visible"),40),50);
+  });
+  ["IN_CATEGORY","IN_ORG","USES_STACK","VARIANT_OF"].forEach(rel=>
+    document.getElementById("rel-"+rel).addEventListener("change",updateRelations));
+
+  // ---- init ---------------------------------------------------------------
+  window.cy = cy;  // ponytail: handy in browser console + lets a smoke test read state
+  updateRelations();
+  runLayout("cose");
+  setTimeout(()=>cy.fit(cy.nodes(":visible"),40),60);
+})();
+</script>
+</body>
+</html>
