@@ -24,8 +24,15 @@
   .stats{display:flex;gap:16px;margin-left:auto}
   aside{background:var(--panel);overflow-y:auto;padding:14px;border-right:1px solid var(--line)}
   aside.right{border-right:none;border-left:1px solid var(--line)}
-  #cy{width:100%;height:100%;background:
+  #stage{position:relative;overflow:hidden}
+  #cy{position:absolute;inset:0;background:
      radial-gradient(circle at 30% 20%,#11161f,#0d1117 70%)}
+  .cytools{position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:6px;z-index:6;
+    background:rgba(22,27,34,.85);border:1px solid var(--line);border-radius:8px;padding:5px 7px}
+  .cytools button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:5px 9px;cursor:pointer;font-size:12px;line-height:1}
+  .cytools button:hover{border-color:var(--accent)}
+  .cytools .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
   .group{margin-bottom:18px}
   .group h3{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
     margin:0 0 8px;font-weight:600}
@@ -122,13 +129,33 @@
         <span style="color:#6e7681">stale</span>
       </small>
     </div>
+    <div class="group">
+      <h3>Explore</h3>
+      <div class="btnrow"><button id="expand2">⤧ Expand selection</button></div>
+      <div class="btnrow"><button id="isolate">◎ Isolate</button><button id="collapse2">⤺ Collapse</button></div>
+      <small class="muted" style="display:block;margin-top:6px;line-height:1.5">
+        Hover a repo to preview links · click to inspect ·
+        <b style="color:var(--txt)">double-click or right-click to expand</b>
+        its org / stack / duplicates · drag to move · shift-drag to multi-select.
+      </small>
+    </div>
     <div class="group legend">
       <h3>Filter categories</h3>
       <div id="catfilter"></div>
     </div>
   </aside>
 
-  <div id="cy"></div>
+  <div id="stage">
+    <div id="cy"></div>
+    <div class="cytools">
+      <button id="zin" title="Zoom in">＋</button>
+      <button id="zout" title="Zoom out">－</button>
+      <button id="fitb" title="Fit to view">⤢ Fit</button>
+      <span class="sep"></span>
+      <button id="expand" title="Expand the selected node's relationships — or double-click / right-click any node">⤧ Expand</button>
+      <button id="collapse" title="Collapse expansions, back to the grouped map">⤺ Collapse</button>
+    </div>
+  </div>
 
   <aside class="right">
     <div id="details"><div class="ph">Click any repo or category box to inspect.<br/>Repos are grouped into category boxes; the ring colour shows git health.</div></div>
@@ -204,7 +231,7 @@
   const cy = cytoscape({
     container:document.getElementById("cy"),
     elements,
-    minZoom:.15,maxZoom:3,
+    minZoom:.15,maxZoom:3,boxSelectionEnabled:true,selectionType:"single",wheelSensitivity:.3,
     style:[
       {selector:"node[kind='project']",style:{
         "background-color":"data(bg)","label":"data(label)","color":"#adbac7",
@@ -239,7 +266,19 @@
       {selector:"node[kind='project'].lbl-on",style:{"text-opacity":1}},
       {selector:".hot",style:{"text-opacity":1,"border-width":3,"border-color":"#fff","z-index":99}},
       {selector:".hidden",style:{"display":"none"}},
-      {selector:"node:selected",style:{"border-width":3,"border-color":"#fff","text-opacity":1}}
+      {selector:"node:selected",style:{"border-width":3,"border-color":"#fff","text-opacity":1}},
+      {selector:".hover",style:{"opacity":1}},
+      {selector:"node.hover",style:{"border-width":3,"border-color":"#cdd9e5","text-opacity":1,"z-index":90}},
+      {selector:"edge.hover",style:{"opacity":1,"width":1.8,"line-color":"#58a6ff","curve-style":"bezier",
+        "label":"data(rel)","font-size":7,"color":"#9aa7b4","text-rotation":"autorotate",
+        "text-background-color":"#0d1117","text-background-opacity":.75,"text-background-padding":2,"z-index":90}},
+      {selector:".hl",style:{"opacity":1}},
+      {selector:"node.hl",style:{"border-width":3,"border-color":"#fff","text-opacity":1,"z-index":100}},
+      {selector:"edge.hl",style:{"opacity":1,"width":2.2,"line-color":"#58a6ff","curve-style":"bezier",
+        "label":"data(rel)","font-size":7,"color":"#c9d1d9","text-rotation":"autorotate",
+        "text-background-color":"#0d1117","text-background-opacity":.8,"text-background-padding":2,
+        "target-arrow-shape":"triangle","target-arrow-color":"#58a6ff","z-index":100}},
+      {selector:"edge[rel='VARIANT_OF'].hl",style:{"line-color":"#f0883e","target-arrow-color":"#f0883e"}}
     ],
     layout:{name:"preset"}
   });
@@ -371,15 +410,116 @@
       <div class="sub">${kind.toUpperCase()} hub · ${conn.length} repos</div>
       <div style="margin-top:10px;line-height:2">${list}</div>`;
   }
-  cy.on("tap","node",e=>{
-    const d=e.target.data();
-    if(d.kind==="project") showProject(d); else showHub(d);
+  // ---- Neo4j-style exploration -------------------------------------------
+  // Focus the camera on an expansion without slamming to max zoom.
+  function focusOn(eles,node){
+    cy.animate({fit:{eles,padding:90}},{duration:260,complete:()=>{
+      if(cy.zoom()>1.5){ cy.zoom({level:1.5,position:node.position()}); }
+    }});
+  }
+  // Reveal a repo's relationships in place: un-hide its org/stack hubs + edges,
+  // fan the newly-shown hubs around it, and highlight the lot.
+  function revealAround(node){
+    const pos=node.position();
+    const eds=node.connectedEdges('[rel="IN_ORG"],[rel="USES_STACK"],[rel="VARIANT_OF"]');
+    const hubs=eds.connectedNodes('[kind!="project"]').not(node);
+    const N=Math.max(1,hubs.length); let i=0;
+    hubs.forEach(h=>{
+      if(h.hasClass("hidden")){
+        const a=-Math.PI/2 + (i/N)*Math.PI*2;
+        h.position({x:pos.x+85*Math.cos(a), y:pos.y+85*Math.sin(a)});
+      }
+      h.removeClass("hidden").addClass("revealed");
+      i++;
+    });
+    eds.removeClass("hidden").addClass("hl revealed");
+    node.addClass("hl");
+    return node.union(eds).union(hubs);
+  }
+  // Expand a hub (org/stack): show its edges + highlight every member repo.
+  function revealHub(hub){
+    const eds=hub.connectedEdges();
+    eds.removeClass("hidden").addClass("hl revealed");
+    hub.addClass("hl");
+    return hub.union(eds).union(eds.connectedNodes());
+  }
+  function expandEle(ele){
+    if(ele.data("kind")==="project") return revealAround(ele);
+    if(ele.data("kind")==="category"){ const ch=ele.children(); ch.select(); ch.addClass("hl"); return ch; }
+    return revealHub(ele);
+  }
+  function expandSelection(){
+    const sel=cy.$("node:selected");
+    const targets=sel.nonempty()?sel:cy.$("node.hl");
+    if(targets.empty()) return;
+    let acc=cy.collection();
+    targets.forEach(n=>{acc=acc.union(expandEle(n));});
+    if(acc.nonempty()) focusOn(acc,targets[0]);
+  }
+  function collapseExplore(){
+    cy.elements().removeClass("hl hover revealed dim hot");
+    cy.$(":selected").unselect();
+    updateRelations();                       // re-hide org/stack hubs per overlay state
+    if(document.getElementById("layout").value==="map") runLayout("map");
+    else cy.fit(cy.nodes(":visible"),40);
+  }
+  function isolateSelection(){
+    const sel=cy.$("node:selected").add(cy.$("node.hl"));
+    if(sel.empty()) return;
+    const keep=sel.add(sel.connectedEdges(":visible")).add(sel.connectedEdges(":visible").connectedNodes(":visible"));
+    cy.elements().addClass("dim");
+    keep.removeClass("dim");
+  }
+
+  // hover = transient relationship preview
+  cy.on("mouseover","node",e=>{
+    const n=e.target, ed=n.connectedEdges(":visible");
+    n.addClass("hover"); ed.addClass("hover"); ed.connectedNodes(":visible").addClass("hover");
   });
-  cy.on("tap",e=>{if(e.target===cy){cy.elements().removeClass("dim hot");cy.$(":selected").unselect();}});
+  cy.on("mouseout","node",()=>cy.elements().removeClass("hover"));
+
+  // click = inspect; double-click / right-click = expand
+  let lastTap=0,lastId=null;
+  cy.on("tap","node",e=>{
+    const n=e.target,d=n.data(),id=n.id(),now=Date.now();
+    if(d.kind==="project") showProject(d); else showHub(d);
+    if(id===lastId && now-lastTap<350){
+      const got=expandEle(n);
+      if(got&&got.nonempty()) focusOn(n.union(got),n);
+    }
+    lastTap=now; lastId=id;
+  });
+  cy.on("cxttap","node",e=>{
+    const got=expandEle(e.target);
+    if(got&&got.nonempty()) focusOn(e.target.union(got),e.target);
+  });
+  // right-click on canvas shouldn't pop the OS menu (we use it to expand)
+  cy.container().addEventListener("contextmenu",ev=>ev.preventDefault());
+  cy.on("tap",e=>{ if(e.target===cy){ cy.elements().removeClass("dim hot hover"); cy.$(":selected").unselect(); } });
 
   // ---- controls -----------------------------------------------------------
   document.getElementById("layout").addEventListener("change",e=>runLayout(e.target.value));
   document.getElementById("fit").addEventListener("click",()=>cy.fit(cy.nodes(":visible"),40));
+
+  // graph toolbar + explore actions
+  const zoomBy=f=>cy.animate({zoom:Math.min(3,Math.max(.15,cy.zoom()*f)),
+    renderedPosition:{x:cy.width()/2,y:cy.height()/2}},{duration:150});
+  document.getElementById("zin").addEventListener("click",()=>zoomBy(1.3));
+  document.getElementById("zout").addEventListener("click",()=>zoomBy(1/1.3));
+  document.getElementById("fitb").addEventListener("click",()=>cy.fit(cy.nodes(":visible"),40));
+  document.getElementById("expand").addEventListener("click",expandSelection);
+  document.getElementById("expand2").addEventListener("click",expandSelection);
+  document.getElementById("collapse").addEventListener("click",collapseExplore);
+  document.getElementById("collapse2").addEventListener("click",collapseExplore);
+  document.getElementById("isolate").addEventListener("click",isolateSelection);
+  window.addEventListener("keydown",e=>{
+    if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+    if(e.key==="e") expandSelection();
+    else if(e.key==="c") collapseExplore();
+    else if(e.key==="i") isolateSelection();
+    else if(e.key==="f") cy.fit(cy.nodes(":visible"),40);
+    else if(e.key==="Escape"){cy.elements().removeClass("dim hot hover");cy.$(":selected").unselect();}
+  });
 
   // show-all-labels toggle
   let labelsOn=false;
@@ -422,7 +562,8 @@
     document.getElementById("search").value="";
     labelsOn=true; document.getElementById("labels").checked=true;
     attnOn=false; document.getElementById("attn").classList.remove("on");
-    cy.elements().removeClass("dim hot");
+    cy.elements().removeClass("dim hot hl hover revealed");
+    cy.$(":selected").unselect();
     cy.nodes("[kind='project']").addClass("lbl-on");
     document.getElementById("layout").value="map";
     updateCatFilter(); runLayout("map"); setTimeout(()=>cy.fit(cy.nodes(":visible"),30),50);
